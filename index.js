@@ -3,7 +3,6 @@ const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 
 const app = express();
 
-// CORS pour autoriser Netlify
 app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
   res.header('Access-Control-Allow-Headers', 'Content-Type');
@@ -12,11 +11,109 @@ app.use((req, res, next) => {
   next();
 });
 
-async function envoyerEmail(to, ref, montant, pieces) {
+async function envoyerEmail(to, ref, montant, vehicule, vin, pieces) {
   const fetch = (...args) => import('node-fetch').then(({default: f}) => f(...args));
+
   const piecesHTML = pieces && pieces.length
-    ? pieces.map(p => `<tr><td style="padding:10px 20px;border-bottom:1px solid #1e1e2e;color:#47c4ff;font-size:14px;font-weight:600;">🔩 ${p}</td></tr>`).join('')
-    : '<tr><td style="padding:10px 20px;color:#6b6b80;">Références en cours de préparation</td></tr>';
+    ? pieces.map(p => {
+        const parts = p.split(' — ');
+        const oem = parts[0] || p;
+        const desc = parts[1] || '';
+        return `
+          <tr>
+            <td style="padding:12px 20px;border-bottom:1px solid #1e1e30;">
+              <div style="color:#47c4ff;font-size:13px;font-weight:700;font-family:'Courier New',monospace;">${oem}</div>
+              ${desc ? `<div style="color:#55556a;font-size:11px;margin-top:3px;">${desc}</div>` : ''}
+            </td>
+          </tr>`;
+      }).join('')
+    : '<tr><td style="padding:12px 20px;color:#55556a;font-size:12px;">Références en cours de préparation</td></tr>';
+
+  const vinHTML = vin ? `
+    <tr>
+      <td style="padding:16px 20px;border-bottom:1px solid #1e1e30;border-right:1px solid #1e1e30;width:50%;">
+        <div style="font-size:10px;color:#55556a;text-transform:uppercase;letter-spacing:2px;margin-bottom:5px;">Véhicule</div>
+        <div style="color:#f0f0f5;font-size:13px;font-weight:600;">${vehicule}</div>
+      </td>
+      <td style="padding:16px 20px;border-bottom:1px solid #1e1e30;width:50%;">
+        <div style="font-size:10px;color:#55556a;text-transform:uppercase;letter-spacing:2px;margin-bottom:5px;">VIN</div>
+        <div style="color:#47c4ff;font-size:12px;font-weight:700;font-family:'Courier New',monospace;">${vin}</div>
+      </td>
+    </tr>` : `
+    <tr>
+      <td colspan="2" style="padding:16px 20px;border-bottom:1px solid #1e1e30;">
+        <div style="font-size:10px;color:#55556a;text-transform:uppercase;letter-spacing:2px;margin-bottom:5px;">Véhicule</div>
+        <div style="color:#f0f0f5;font-size:13px;font-weight:600;">${vehicule}</div>
+      </td>
+    </tr>`;
+
+  const html = `<!DOCTYPE html>
+<html lang="fr">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"></head>
+<body style="margin:0;padding:0;background:#07070f;font-family:'Helvetica Neue',Arial,sans-serif;">
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#07070f;padding:48px 20px;">
+<tr><td align="center">
+<table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;">
+
+  <tr><td style="height:3px;background:linear-gradient(90deg,#47ffb0,#47c4ff);border-radius:3px 3px 0 0;"></td></tr>
+
+  <tr><td style="background:#10101a;border:1px solid #1e1e30;border-top:none;padding:36px 44px 28px;text-align:center;">
+    <div style="font-size:22px;font-weight:900;color:#f0f0f5;letter-spacing:2px;">AUTOREF<span style="color:#e8ff47;">EXPRESS</span></div>
+    <div style="font-size:10px;color:#55556a;letter-spacing:4px;text-transform:uppercase;margin-top:6px;">Recherche de pièces OEM · Nouvelle-Calédonie</div>
+    <div style="width:40px;height:2px;background:#47ffb0;margin:18px auto 0;border-radius:2px;"></div>
+  </td></tr>
+
+  <tr><td style="background:#10101a;border-left:1px solid #1e1e30;border-right:1px solid #1e1e30;padding:20px 44px 0;text-align:center;">
+    <span style="display:inline-block;background:rgba(71,255,176,0.08);border:1px solid rgba(71,255,176,0.25);color:#47ffb0;padding:8px 24px;border-radius:8px;font-size:11px;font-weight:700;letter-spacing:3px;text-transform:uppercase;">
+      ✅ Paiement confirmé
+    </span>
+  </td></tr>
+
+  <tr><td style="background:#10101a;border-left:1px solid #1e1e30;border-right:1px solid #1e1e30;padding:28px 44px 36px;">
+
+    <p style="color:#f0f0f5;font-size:15px;margin:0 0 6px;font-weight:600;">Bonjour,</p>
+    <p style="color:#55556a;font-size:13px;margin:0 0 28px;line-height:1.7;">
+      Votre paiement a bien été reçu. Voici vos références OEM exactes pour votre véhicule.
+    </p>
+
+    <!-- INFO -->
+    <table width="100%" cellpadding="0" cellspacing="0" style="background:#07070f;border:1px solid #1e1e30;border-radius:12px;margin-bottom:20px;overflow:hidden;">
+      <tr>
+        <td style="padding:16px 20px;border-bottom:1px solid #1e1e30;border-right:1px solid #1e1e30;width:50%;">
+          <div style="font-size:10px;color:#55556a;text-transform:uppercase;letter-spacing:2px;margin-bottom:5px;">Référence devis</div>
+          <div style="color:#f0f0f5;font-size:15px;font-weight:700;">${ref}</div>
+        </td>
+        <td style="padding:16px 20px;border-bottom:1px solid #1e1e30;width:50%;">
+          <div style="font-size:10px;color:#55556a;text-transform:uppercase;letter-spacing:2px;margin-bottom:5px;">Montant payé</div>
+          <div style="color:#e8ff47;font-size:18px;font-weight:900;">${montant}</div>
+        </td>
+      </tr>
+      ${vinHTML}
+    </table>
+
+    <!-- PIÈCES OEM -->
+    <table width="100%" cellpadding="0" cellspacing="0" style="background:#07070f;border:1px solid rgba(71,196,255,0.25);border-radius:12px;margin-bottom:28px;overflow:hidden;">
+      <tr><td style="padding:14px 20px;border-bottom:1px solid #1e1e30;background:rgba(71,196,255,0.05);">
+        <div style="font-size:10px;color:#47c4ff;text-transform:uppercase;letter-spacing:3px;font-weight:700;">🔓 Vos références OEM</div>
+      </td></tr>
+      ${piecesHTML}
+    </table>
+
+    <p style="color:#55556a;font-size:11px;text-align:center;margin:0;line-height:1.6;">
+      Merci de votre confiance — AUTOREF EXPRESS 🇳🇨
+    </p>
+
+  </td></tr>
+
+  <tr><td style="background:#0c0c18;border:1px solid #1e1e30;border-top:none;border-radius:0 0 12px 12px;padding:20px 44px;text-align:center;">
+    <p style="color:#2e2e45;font-size:10px;margin:0;letter-spacing:3px;text-transform:uppercase;">AUTOREF EXPRESS · 🇳🇨 Nouvelle-Calédonie</p>
+  </td></tr>
+
+</table>
+</td></tr>
+</table>
+</body>
+</html>`;
 
   const response = await fetch('https://api.brevo.com/v3/smtp/email', {
     method: 'POST',
@@ -24,66 +121,17 @@ async function envoyerEmail(to, ref, montant, pieces) {
     body: JSON.stringify({
       sender: { name: 'AUTOREF EXPRESS', email: process.env.SENDER_EMAIL },
       to: [{ email: to }],
-      subject: `✅ Paiement confirmé - ${ref}`,
-      htmlContent: `
-<!DOCTYPE html>
-<html lang="fr">
-<head><meta charset="UTF-8"></head>
-<body style="margin:0;padding:0;background-color:#0a0a0f;font-family:Arial,sans-serif;">
-  <table width="100%" cellpadding="0" cellspacing="0" style="background:#0a0a0f;padding:40px 20px;">
-    <tr><td align="center">
-      <table width="580" cellpadding="0" cellspacing="0">
-        <tr><td style="background:#13131a;border:1px solid #1e1e2e;border-radius:16px 16px 0 0;padding:32px 40px;text-align:center;">
-          <div style="font-size:24px;font-weight:900;color:#f0f0f5;">AUTOREF<span style="color:#e8ff47;">EXPRESS</span></div>
-          <div style="font-size:11px;color:#6b6b80;letter-spacing:2px;margin-top:6px;">RECHERCHE DE PIÈCES OEM</div>
-        </td></tr>
-        <tr><td style="background:#13131a;border-left:1px solid #1e1e2e;border-right:1px solid #1e1e2e;padding:20px 40px 0;text-align:center;">
-          <span style="background:rgba(71,255,176,0.1);border:1px solid rgba(71,255,176,0.3);color:#47ffb0;padding:6px 20px;border-radius:100px;font-size:12px;font-weight:600;">✅ PAIEMENT CONFIRMÉ</span>
-        </td></tr>
-        <tr><td style="background:#13131a;border-left:1px solid #1e1e2e;border-right:1px solid #1e1e2e;padding:24px 40px 32px;">
-          <p style="color:#f0f0f5;font-size:16px;margin:0 0 12px;">Bonjour,</p>
-          <p style="color:#6b6b80;font-size:14px;margin:0 0 24px;line-height:1.6;">Votre paiement a bien été reçu. Voici vos références OEM exactes :</p>
-
-          <table width="100%" style="background:#0a0a0f;border:1px solid #1e1e2e;border-radius:10px;margin-bottom:24px;">
-            <tr>
-              <td style="padding:14px 20px;border-bottom:1px solid #1e1e2e;">
-                <div style="color:#6b6b80;font-size:11px;text-transform:uppercase;">Référence devis</div>
-                <div style="color:#f0f0f5;font-size:15px;font-weight:600;margin-top:4px;">${ref}</div>
-              </td>
-              <td style="padding:14px 20px;border-bottom:1px solid #1e1e2e;">
-                <div style="color:#6b6b80;font-size:11px;text-transform:uppercase;">Montant payé</div>
-                <div style="color:#e8ff47;font-size:15px;font-weight:700;margin-top:4px;">${montant}</div>
-              </td>
-            </tr>
-          </table>
-
-          <div style="background:#0a0a0f;border:1px solid rgba(71,255,176,0.3);border-radius:10px;margin-bottom:24px;">
-            <div style="padding:14px 20px;border-bottom:1px solid #1e1e2e;">
-              <div style="color:#47ffb0;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:1px;">🔓 Vos références OEM</div>
-            </div>
-            <table width="100%">${piecesHTML}</table>
-          </div>
-
-          <p style="color:#6b6b80;font-size:12px;text-align:center;margin:0;">Merci de votre confiance — AUTOREF EXPRESS 🇳🇨</p>
-        </td></tr>
-        <tr><td style="background:#0d0d14;border:1px solid #1e1e2e;border-top:none;border-radius:0 0 16px 16px;padding:20px 40px;text-align:center;">
-          <p style="color:#6b6b80;font-size:11px;margin:0;text-transform:uppercase;letter-spacing:1px;">AUTOREF EXPRESS — Nouvelle-Calédonie</p>
-        </td></tr>
-      </table>
-    </td></tr>
-  </table>
-</body>
-</html>`
+      subject: `✅ Paiement confirmé — ${ref}`,
+      htmlContent: html
     })
   });
 
   if (!response.ok) throw new Error(await response.text());
 }
 
-// ======= CRÉER CHECKOUT SESSION =======
 app.post('/create-checkout', express.json(), async (req, res) => {
   try {
-    const { ref, client, email, vehicule, montant, pieces } = req.body;
+    const { ref, client, email, vehicule, vin, montant, pieces } = req.body;
     if (!montant || montant <= 0) return res.status(400).json({ error: 'Montant requis' });
 
     const session = await stripe.checkout.sessions.create({
@@ -106,6 +154,7 @@ app.post('/create-checkout', express.json(), async (req, res) => {
         client,
         email: email || '',
         vehicule,
+        vin: vin || '',
         pieces: JSON.stringify(pieces)
       },
       success_url: `https://iridescent-naiad-d503c6.netlify.app?paiement=ok&ref=${ref}`,
@@ -120,7 +169,6 @@ app.post('/create-checkout', express.json(), async (req, res) => {
   }
 });
 
-// ======= WEBHOOK STRIPE =======
 app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
   const sig = req.headers['stripe-signature'];
   let event;
@@ -136,6 +184,8 @@ app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res)
     const session = event.data.object;
     const email = session.customer_email || session.customer_details?.email;
     const ref = session.metadata?.ref || 'Votre devis';
+    const vehicule = session.metadata?.vehicule || '';
+    const vin = session.metadata?.vin || '';
     const pieces = session.metadata?.pieces ? JSON.parse(session.metadata.pieces) : [];
     const montant = session.amount_total ? Math.round(session.amount_total).toLocaleString('fr-FR') + ' FCFP' : '';
 
@@ -143,7 +193,7 @@ app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res)
 
     if (email) {
       try {
-        await envoyerEmail(email, ref, montant, pieces);
+        await envoyerEmail(email, ref, montant, vehicule, vin, pieces);
         console.log('📧 Email avec références envoyé à', email);
       } catch(e) {
         console.log('❌ Email error:', e.message);
@@ -155,7 +205,6 @@ app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res)
 });
 
 app.use(express.json());
-
 app.get('/', (req, res) => res.json({ status: '✅ AUTOREF EXPRESS serveur actif' }));
 
 const PORT = process.env.PORT || 3000;

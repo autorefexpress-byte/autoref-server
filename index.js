@@ -169,6 +169,9 @@ app.post('/create-checkout', express.json(), async (req, res) => {
   }
 });
 
+// Protection anti-doublon
+const processedEvents = new Set();
+
 app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
   const sig = req.headers['stripe-signature'];
   let event;
@@ -179,6 +182,15 @@ app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res)
     console.log('❌ Webhook error:', err.message);
     return res.status(400).send(`Webhook Error: ${err.message}`);
   }
+
+  // Ignorer si déjà traité
+  if (processedEvents.has(event.id)) {
+    console.log('⚠️ Événement déjà traité, ignoré:', event.id);
+    return res.json({ received: true });
+  }
+  processedEvents.add(event.id);
+  // Nettoyer après 24h pour éviter la surcharge mémoire
+  setTimeout(() => processedEvents.delete(event.id), 86400000);
 
   if (event.type === 'checkout.session.completed') {
     const session = event.data.object;

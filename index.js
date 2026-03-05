@@ -1,43 +1,22 @@
 const express = require('express');
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
-const nodemailer = require('nodemailer');
 
 const app = express();
 
-const transporter = nodemailer.createTransport({
-  service: 'gmail',
-  auth: {
-    user: process.env.GMAIL_USER,
-    pass: process.env.GMAIL_APP_PASSWORD
-  }
-});
-
-app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
-  const sig = req.headers['stripe-signature'];
-  let event;
-
-  try {
-    event = stripe.webhooks.constructEvent(req.body, sig, process.env.STRIPE_WEBHOOK_SECRET);
-  } catch (err) {
-    console.log('❌ Webhook error:', err.message);
-    return res.status(400).send(`Webhook Error: ${err.message}`);
-  }
-
-  if (event.type === 'checkout.session.completed' || event.type === 'payment_intent.succeeded') {
-    const obj = event.data.object;
-    const email = obj.customer_email || obj.receipt_email || (obj.customer_details && obj.customer_details.email);
-    const ref = obj.metadata && obj.metadata.ref ? obj.metadata.ref : 'Votre devis';
-    const montant = obj.amount_total ? Math.round(obj.amount_total).toLocaleString('fr-FR') + ' FCFP' : '';
-
-    console.log(`✅ Paiement reçu — Email: ${email} — Ref: ${ref}`);
-
-    if (email) {
-      try {
-        await transporter.sendMail({
-          from: `"AUTOREF EXPRESS" <${process.env.GMAIL_USER}>`,
-          to: email,
-          subject: `✅ Paiement confirmé - ${ref}`,
-          html: `
+async function envoyerEmail(to, ref, montant) {
+  const fetch = (...args) => import('node-fetch').then(({default: f}) => f(...args));
+  
+  const response = await fetch('https://api.brevo.com/v3/smtp/email', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'api-key': process.env.BREVO_API_KEY
+    },
+    body: JSON.stringify({
+      sender: { name: 'AUTOREF EXPRESS', email: process.env.SENDER_EMAIL },
+      to: [{ email: to }],
+      subject: `✅ Paiement confirmé - ${ref}`,
+      htmlContent: `
 <!DOCTYPE html>
 <html lang="fr">
 <head><meta charset="UTF-8"></head>
@@ -70,7 +49,7 @@ app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res)
           <div style="background:#0a0a0f;border:1px solid rgba(71,255,176,0.2);border-radius:10px;padding:24px;text-align:center;margin-bottom:24px;">
             <div style="font-size:32px;margin-bottom:8px;">🔓</div>
             <div style="color:#47ffb0;font-size:15px;font-weight:700;margin-bottom:6px;">Références OEM en préparation</div>
-            <div style="color:#6b6b80;font-size:13px;line-height:1.6;">Nous vous contacterons très prochainement.</div>
+            <div style="color:#6b6b80;font-size:13px;line-height:1.6;">Nous vous contacterons très prochainement avec vos références.</div>
           </div>
           <p style="color:#6b6b80;font-size:12px;text-align:center;margin:0;">Merci de votre confiance — AUTOREF EXPRESS 🇳🇨</p>
         </td></tr>
@@ -82,7 +61,38 @@ app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res)
   </table>
 </body>
 </html>`
-        });
+    })
+  });
+
+  if (!response.ok) {
+    const err = await response.text();
+    throw new Error(err);
+  }
+  return response;
+}
+
+app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
+  const sig = req.headers['stripe-signature'];
+  let event;
+
+  try {
+    event = stripe.webhooks.constructEvent(req.body, sig, process.env.STRIPE_WEBHOOK_SECRET);
+  } catch (err) {
+    console.log('❌ Webhook error:', err.message);
+    return res.status(400).send(`Webhook Error: ${err.message}`);
+  }
+
+  if (event.type === 'checkout.session.completed' || event.type === 'payment_intent.succeeded') {
+    const obj = event.data.object;
+    const email = obj.customer_email || obj.receipt_email || (obj.customer_details && obj.customer_details.email);
+    const ref = obj.metadata && obj.metadata.ref ? obj.metadata.ref : 'Votre devis';
+    const montant = obj.amount_total ? Math.round(obj.amount_total).toLocaleString('fr-FR') + ' FCFP' : '';
+
+    console.log(`✅ Paiement reçu — Email: ${email} — Ref: ${ref}`);
+
+    if (email) {
+      try {
+        await envoyerEmail(email, ref, montant);
         console.log('📧 Email envoyé à', email);
       } catch(e) {
         console.log('❌ Email error:', e.message);

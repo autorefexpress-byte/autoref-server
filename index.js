@@ -215,7 +215,43 @@ app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res)
 
   res.json({ received: true });
 });
+// Route demande depuis app mobile
+app.post('/demande', express.json(), async (req, res) => {
+  const fetch = (...args) => import('node-fetch').then(({default: f}) => f(...args));
+  const { vehicule, vin, pieces, email } = req.body;
 
+  try {
+    // Email vers toi
+    await fetch('https://api.brevo.com/v3/smtp/email', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'api-key': process.env.BREVO_API_KEY },
+      body: JSON.stringify({
+        sender: { name: 'AUTOREF EXPRESS APP', email: process.env.SENDER_EMAIL },
+        to: [{ email: process.env.SENDER_EMAIL }],
+        subject: `📱 Nouvelle demande APP — ${vehicule}`,
+        htmlContent: `<h2>Nouvelle demande via l'app</h2><p><b>Véhicule :</b> ${vehicule}</p><p><b>VIN :</b> ${vin || 'Non renseigné'}</p><p><b>Pièces :</b> ${pieces}</p><p><b>Email client :</b> ${email}</p>`
+      })
+    });
+
+    // Email confirmation vers client
+    await fetch('https://api.brevo.com/v3/smtp/email', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'api-key': process.env.BREVO_API_KEY },
+      body: JSON.stringify({
+        sender: { name: 'AUTOREF EXPRESS', email: process.env.SENDER_EMAIL },
+        to: [{ email: email }],
+        subject: '✅ Votre demande AUTOREF EXPRESS a bien été reçue',
+        htmlContent: `<h2>Bonjour !</h2><p>Votre demande a bien été reçue.</p><p><b>Véhicule :</b> ${vehicule}</p><p><b>Pièces :</b> ${pieces}</p><p>Notre expert va rechercher vos références OEM et vous enverra un devis par email.</p><br><p>L'équipe AUTOREF EXPRESS 🔧</p>`
+      })
+    });
+
+    console.log(`📱 Demande app reçue — ${vehicule} — ${email}`);
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Erreur demande app:', error);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
 app.use(express.json());
 app.get('/', (req, res) => res.json({ status: '✅ AUTOREF EXPRESS serveur actif' }));
 

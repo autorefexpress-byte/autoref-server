@@ -317,6 +317,6 @@ Réponds en français, de manière concise. Utilise des emojis avec modération.
 });
 
 app.use(express.json());
-app.get('/, (req, res) => res.json({ status: '✅ AUTOREF EXPRESS serveur actif' }));
+app.get('/', (req, res) => res.json({ status: '✅ AUTOREF EXPRESS serveur actif' }));
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`🚀 Serveur démarré sur le port ${PORT}`));

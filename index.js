@@ -1,7 +1,6 @@
 const express = require('express');
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const app = express();
-
 app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
   res.header('Access-Control-Allow-Headers', 'Content-Type');
@@ -11,17 +10,18 @@ app.use((req, res, next) => {
 });
 
 // ========== FIREBASE SYNC ==========
-async function syncFirebase(email, statut, refs = []) {
+async function syncFirebase(ref, statut, refs = []) {
   const fetch = (...args) => import('node-fetch').then(({default: f}) => f(...args));
   const FIREBASE_URL = 'https://autoref-express-default-rtdb.asia-southeast1.firebasedatabase.app';
   try {
     const res = await fetch(`${FIREBASE_URL}/demandes.json`);
     const data = await res.json();
     if (!data) { console.log('⚠️ Firebase vide'); return; }
-    const entry = Object.entries(data).find(([k, v]) =>
-      v.email === email && (v.statut === 'devis_pret' || v.statut === 'en_attente')
-    );
-    if (!entry) { console.log('⚠️ Demande Firebase non trouvée pour', email); return; }
+
+    // Recherche par ref ARX — identifiant unique, pas d'ambiguïté
+    const entry = Object.entries(data).find(([k, v]) => v.ref === ref);
+
+    if (!entry) { console.log('⚠️ Demande Firebase non trouvée pour ref:', ref); return; }
     const [key] = entry;
     const patch = { statut };
     if (refs.length > 0) patch.refs = refs;
@@ -30,7 +30,7 @@ async function syncFirebase(email, statut, refs = []) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(patch)
     });
-    console.log('✅ Firebase sync OK | email:', email, '| statut:', statut, '| refs:', refs.length);
+    console.log('✅ Firebase sync OK | ref:', ref, '| statut:', statut, '| refs:', refs.length);
   } catch(e) {
     console.error('❌ Firebase sync error:', e.message);
   }
@@ -53,7 +53,6 @@ async function envoyerEmail(to, ref, montant, vehicule, vin, pieces) {
           </tr>`;
       }).join('')
     : '<tr><td style="padding:12px 20px;color:#55556a;font-size:12px;">Références en cours de préparation</td></tr>';
-
   const vinHTML = vin ? `
     <tr>
       <td style="padding:16px 20px;border-bottom:1px solid #1e1e30;border-right:1px solid #1e1e30;width:50%;">
@@ -71,7 +70,6 @@ async function envoyerEmail(to, ref, montant, vehicule, vin, pieces) {
         <div style="color:#f0f0f5;font-size:13px;font-weight:600;">${vehicule}</div>
       </td>
     </tr>`;
-
   const html = `<!DOCTYPE html>
 <html lang="fr">
 <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"></head>
@@ -126,7 +124,6 @@ async function envoyerEmail(to, ref, montant, vehicule, vin, pieces) {
 </table>
 </body>
 </html>`;
-
   const response = await fetch('https://api.brevo.com/v3/smtp/email', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'api-key': process.env.BREVO_API_KEY },
@@ -161,7 +158,7 @@ app.post('/create-checkout', express.json(), async (req, res) => {
         quantity: 1
       }],
       metadata: {
-        ref,
+        ref,           // ← clé unique pour identifier la demande Firebase
         client,
         email: email || '',
         vehicule,
@@ -181,7 +178,6 @@ app.post('/create-checkout', express.json(), async (req, res) => {
 
 // ========== WEBHOOK STRIPE ==========
 const processedEvents = new Set();
-
 app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
   const sig = req.headers['stripe-signature'];
   let event;
@@ -191,7 +187,6 @@ app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res)
     console.log('❌ Webhook error:', err.message);
     return res.status(400).send(`Webhook Error: ${err.message}`);
   }
-
   if (processedEvents.has(event.id)) {
     console.log('⚠️ Événement déjà traité, ignoré:', event.id);
     return res.json({ received: true });
@@ -202,37 +197,37 @@ app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res)
   if (event.type === 'checkout.session.completed') {
     const session = event.data.object;
     const email = session.customer_email || session.customer_details?.email;
-    const ref = session.metadata?.ref || 'Votre devis';
+    const ref = session.metadata?.ref || '';          // ← ref ARX depuis metadata Stripe
     const vehicule = session.metadata?.vehicule || '';
     const vin = session.metadata?.vin || '';
     const pieces = session.metadata?.pieces ? JSON.parse(session.metadata.pieces) : [];
-    // XPF au lieu de FCFP
     const montant = session.amount_total ? Math.round(session.amount_total).toLocaleString('fr-FR') + ' XPF' : '';
 
-    console.log(`✅ Paiement reçu — Email: ${email} — Ref: ${ref} — ${pieces.length} pièce(s)`);
+    console.log(`✅ Paiement reçu — Ref: ${ref} — Email: ${email} — ${pieces.length} pièce(s)`);
 
+    // Email avec refs OEM
     if (email) {
-      // Email avec refs OEM
       try {
         await envoyerEmail(email, ref, montant, vehicule, vin, pieces);
         console.log('📧 Email avec références envoyé à', email);
       } catch(e) {
         console.log('❌ Email error:', e.message);
       }
+    }
 
-      // Sync Firebase → statut 'livre' + refs OEM visibles dans l'app
+    // Sync Firebase par ref ARX — identifiant unique, zéro ambiguïté
+    if (ref) {
       try {
         const refs = pieces.map(p => {
           const parts = p.split(' — ');
           return { ref: parts[0] || p, desc: parts[1] || '' };
         });
-        await syncFirebase(email, 'livre', refs);
+        await syncFirebase(ref, 'livre', refs);
       } catch(e) {
         console.log('❌ Firebase sync error:', e.message);
       }
     }
   }
-
   res.json({ received: true });
 });
 
@@ -241,7 +236,6 @@ app.post('/demande', express.json(), async (req, res) => {
   const fetch = (...args) => import('node-fetch').then(({default: f}) => f(...args));
   const { vehicule, vin, pieces, email } = req.body;
   try {
-    // Email vers Emmanuel
     await fetch('https://api.brevo.com/v3/smtp/email', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'api-key': process.env.BREVO_API_KEY },
@@ -252,7 +246,6 @@ app.post('/demande', express.json(), async (req, res) => {
         htmlContent: `<h2>Nouvelle demande via l'app</h2><p><b>Véhicule :</b> ${vehicule}</p><p><b>VIN :</b> ${vin || 'Non renseigné'}</p><p><b>Pièces :</b> ${pieces}</p><p><b>Email client :</b> ${email}</p>`
       })
     });
-    // Email confirmation vers client
     await fetch('https://api.brevo.com/v3/smtp/email', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'api-key': process.env.BREVO_API_KEY },
@@ -273,6 +266,5 @@ app.post('/demande', express.json(), async (req, res) => {
 
 app.use(express.json());
 app.get('/', (req, res) => res.json({ status: '✅ AUTOREF EXPRESS serveur actif' }));
-
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`🚀 Serveur démarré sur le port ${PORT}`));

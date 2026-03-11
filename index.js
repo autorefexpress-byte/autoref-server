@@ -264,7 +264,59 @@ app.post('/demande', express.json(), async (req, res) => {
   }
 });
 
+// ========== ASSISTANT IA ==========
+app.post('/chat', express.json(), async (req, res) => {
+  const fetch = (...args) => import('node-fetch').then(({default: f}) => f(...args));
+  const { messages } = req.body;
+  if (!messages || !messages.length) return res.status(400).json({ error: 'Messages requis' });
+  try {
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': process.env.ANTHROPIC_API_KEY,
+        'anthropic-version': '2023-06-01'
+      },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 1000,
+        system: `Tu es l'assistant IA d'AUTOREF EXPRESS, un service de recherche de références OEM pour pièces automobiles en Nouvelle-Calédonie.
+
+Ton rôle :
+- Identifier le véhicule du client (marque, modèle, année, motorisation)
+- Identifier les pièces recherchées à partir d'une description de panne
+- Estimer les économies possibles avec les bonnes références OEM (prix concessionnaire NC vs commande en ligne)
+- Expliquer pourquoi le numéro VIN est indispensable pour avoir la bonne référence
+- Rediriger vers le formulaire de demande
+
+Tarifs AUTOREF EXPRESS :
+- Simple (1-3 pièces) : 2 000 – 3 000 XPF
+- Complet (4-10 pièces) : 5 000 – 8 000 XPF
+- Garage Pro : sur devis
+
+Économies typiques en NC :
+- Filtre à huile : 2 500 XPF en NC vs 500 XPF en ligne = économie ~2 000 XPF
+- Kit embrayage : 45 000 XPF en NC vs 18 000 XPF en ligne = économie ~27 000 XPF
+- Plaquettes de frein : 8 000 XPF en NC vs 3 000 XPF en ligne = économie ~5 000 XPF
+- Amortisseur : 25 000 XPF en NC vs 9 000 XPF en ligne = économie ~16 000 XPF
+
+Sites recommandés : piecesetpneus.com, rockauto.com, autodoc.fr, eBay Motors
+
+IMPORTANT : Tu donnes des estimations indicatives. Les références OEM certifiées sont fournies UNIQUEMENT après paiement via le formulaire.
+Réponds en français, de manière concise. Utilise des emojis avec modération.`,
+        messages
+      })
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error?.message || 'Erreur API');
+    res.json({ text: data.content?.[0]?.text || 'Pas de réponse' });
+  } catch(e) {
+    console.error('❌ Chat error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.use(express.json());
-app.get('/', (req, res) => res.json({ status: '✅ AUTOREF EXPRESS serveur actif' }));
+app.get('/, (req, res) => res.json({ status: '✅ AUTOREF EXPRESS serveur actif' }));
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`🚀 Serveur démarré sur le port ${PORT}`));
